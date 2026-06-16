@@ -16,7 +16,7 @@ app.use(express.static(path.join(__dirname, '../public')));
 async function publishMQTTMessage(topic, payload) {
   return new Promise((resolve, reject) => {
     const host = process.env.HIVEMQ_HOST;
-    const port = process.env.HIVEMQ_PORT || '8883';
+    const port = process.env.HIVEMQ_PORT || '8884';
     const username = process.env.HIVEMQ_USERNAME;
     const password = process.env.HIVEMQ_PASSWORD;
 
