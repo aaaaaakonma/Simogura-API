@@ -11,12 +11,31 @@ const server = http.createServer(app);
 // Initialize WebSocket server on the same HTTP server instance
 const wss = new WebSocket.Server({ server });
 
+let mqttClient;
+
+// Broadcast system message to all clients (for status changes)
+function broadcastSystemMessage(messageText, extra = {}) {
+  const wsMessage = JSON.stringify({
+    type: 'system',
+    message: messageText,
+    timestamp: new Date().toISOString(),
+    ...extra
+  });
+
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(wsMessage);
+    }
+  });
+}
+
 wss.on('connection', (ws) => {
   console.log(`[WS] Client connected. Total active clients: ${wss.clients.size}`);
 
   ws.send(JSON.stringify({
     type: 'system',
     message: 'Connected to Simogura IoT WebSocket Server',
+    mqtt_connected: mqttClient ? mqttClient.connected : false,
     timestamp: new Date().toISOString()
   }));
 
@@ -60,7 +79,7 @@ function broadcastToWS(topic, payload) {
 
 // Start MQTT bridge daemon only if HiveMQ is configured
 console.log('[App] Initializing background MQTT listener...');
-const mqttClient = initMQTT(async (topic, payload) => {
+mqttClient = initMQTT(async (topic, payload) => {
   console.log(`[App] Message on MQTT topic [${topic}]:`, JSON.stringify(payload));
 
   // 1. Broadcast the message to all active WebSocket clients in real-time
@@ -80,6 +99,19 @@ const mqttClient = initMQTT(async (topic, payload) => {
     }
   }
 });
+
+// Setup status listeners for real-time status propagation
+if (mqttClient) {
+  mqttClient.on('connect', () => {
+    broadcastSystemMessage('MQTT Broker connected successfully.', { mqtt_connected: true });
+  });
+  mqttClient.on('close', () => {
+    broadcastSystemMessage('MQTT Broker disconnected.', { mqtt_connected: false });
+  });
+  mqttClient.on('offline', () => {
+    broadcastSystemMessage('MQTT Broker went offline.', { mqtt_connected: false });
+  });
+}
 
 // Expose MQTT connection status to express app if needed
 app.locals.mqttClient = mqttClient;
