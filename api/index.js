@@ -81,7 +81,8 @@ app.get('/', (req, res) => {
       },
       pools: {
         get: '/api/pools',
-        telemetry: '/api/pools/:id/telemetry'
+        telemetry: '/api/pools/:id/telemetry',
+        delete: '/api/pools/:id'
       }
     }
   });
@@ -188,6 +189,37 @@ app.get('/api/pools/:id/telemetry', async (req, res) => {
   }
 });
 
+// Delete a Pool (Kolam) and all its sensor data
+app.delete('/api/pools/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!isValidUUID(id)) {
+      return res.status(400).json({ error: 'Invalid pool UUID format' });
+    }
+
+    // 1. Delete associated sensor data first to prevent foreign key constraint issues
+    const { error: sensorError } = await supabase
+      .from('data_sensor')
+      .delete()
+      .eq('kolam_id', id);
+
+    if (sensorError) throw sensorError;
+
+    // 2. Delete the pool itself
+    const { error: poolError } = await supabase
+      .from('kolam')
+      .delete()
+      .eq('id', id);
+
+    if (poolError) throw poolError;
+
+    res.json({ success: true, message: `Pool ${id} and its telemetry data have been deleted successfully.` });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Control Valves via MQTT
 app.post('/api/valves', async (req, res) => {
   try {
@@ -209,6 +241,16 @@ app.post('/api/valves', async (req, res) => {
       : `water_control/valves`;
 
     await publishMQTTMessage(topic, payload);
+
+    // Also publish to the global topic if it's not already the global topic
+    // so the ESP32 (which is hardcoded to listen only to water_control/valves) will receive it
+    if (topic !== 'water_control/valves') {
+      try {
+        await publishMQTTMessage('water_control/valves', payload);
+      } catch (mqttErr) {
+        console.warn('[Vercel API] Could not publish to global valves topic:', mqttErr.message);
+      }
+    }
 
     res.json({ success: true, message: `Command published to topic: ${topic}`, payload });
   } catch (error) {
